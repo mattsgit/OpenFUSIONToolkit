@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mpi: ['ON']
+        mpi: ['OFF', 'ON']
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
@@ -87,7 +87,7 @@ jobs:
             -DOFT_USE_MPI=${{ matrix.mpi }} -DBLA_VENDOR=OpenBLAS \
             -DOFT_UMFPACK_ROOT="$PWD/builds/suitesparse-install" \
             -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
-          cmake --build builds/build_release -j 4
+          cmake --build builds/build_release --target test_stitching test_native_bjacobi test_taylor_green_2d oftpy oft_triangle -j 4
       - name: Prove the regression fails on the old dot product
         run: |
           source setup_env.sh
@@ -97,7 +97,7 @@ jobs:
           source setup_env.sh
           cp /tmp/fixed-stitching.F90 src/base/oft_stitching.F90
           python .github/workflows/enable_solver_traps.py
-          cmake --build builds/build_release -j 4
+          cmake --build builds/build_release --target test_stitching test_native_bjacobi test_taylor_green_2d oftpy oft_triangle -j 4
       - name: Verify owned dot products and existing solver regressions
         working-directory: builds/build_release/tests
         run: |

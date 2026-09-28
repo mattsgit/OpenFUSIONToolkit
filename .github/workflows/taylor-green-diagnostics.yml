@@ -34,7 +34,7 @@ jobs:
           cmake -S src -B builds/build_release \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_Fortran_COMPILER=gfortran-12 \
-            -DOFT_BUILD_TESTS=ON -DOFT_BUILD_PYTHON=OFF -DOFT_PACKAGE_PYTHON=OFF \
+            -DOFT_BUILD_TESTS=ON -DOFT_BUILD_PYTHON=ON -DOFT_PACKAGE_PYTHON=OFF \
             -DOFT_USE_MPI=OFF -DBLA_VENDOR=OpenBLAS \
             -DOFT_UMFPACK_ROOT=/usr -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
           cmake --build builds/build_release --target test_taylor_green_2d -j 4

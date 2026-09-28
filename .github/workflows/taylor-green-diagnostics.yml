@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
+      OFT_HAVE_MPI: ${{ matrix.mpi == 'ON' && '1' || '0' }}
       OMP_NUM_THREADS: 2
       OPENBLAS_NUM_THREADS: 1
       OMPI_CC: gcc-12
@@ -87,24 +88,25 @@ jobs:
             -DOFT_USE_MPI=${{ matrix.mpi }} -DBLA_VENDOR=OpenBLAS \
             -DOFT_UMFPACK_ROOT="$PWD/builds/suitesparse-install" \
             -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
-          cmake --build builds/build_release --target test_stitching test_native_bjacobi test_taylor_green_2d oftpy oft_triangle -j 4
+          cmake --build builds/build_release --target test_stitching test_native_bjacobi test_taylor_green_2d oftpy oft_triangle python_scripts -j 4
       - name: Prove the regression fails on the old dot product
         run: |
           source setup_env.sh
           python .github/workflows/check_old_dot.py
       - name: Build the fix with solver arithmetic traps
+        id: fixed
         run: |
           source setup_env.sh
           cp /tmp/fixed-stitching.F90 src/base/oft_stitching.F90
           python .github/workflows/enable_solver_traps.py
-          cmake --build builds/build_release --target test_stitching test_native_bjacobi test_taylor_green_2d oftpy oft_triangle -j 4
+          cmake --build builds/build_release --target test_stitching test_native_bjacobi test_taylor_green_2d oftpy oft_triangle python_scripts -j 4
       - name: Verify owned dot products and existing solver regressions
         working-directory: builds/build_release/tests
         run: |
           source ../../../setup_env.sh
-          bash run_test.sh -q -m "not slow" base/test_stitching.py lin_alg/test_native_bjacobi.py physics/test_taylor_green_2d.py physics/test_ThinCurr.py
+          python -m pytest -q -m "not slow" base/test_stitching.py lin_alg/test_native_bjacobi.py physics/test_taylor_green_2d.py physics/test_ThinCurr.py
       - name: Repeat Taylor-Green with the fix
-        if: always()
+        if: always() && steps.fixed.conclusion == 'success'
         run: |
           source setup_env.sh
           TRACE_VERBOSE=0 TRACE_PHASE=fixed TRACE_REPEATS=30 python .github/workflows/repeat_newton.py

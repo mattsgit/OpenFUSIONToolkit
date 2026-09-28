@@ -66,10 +66,11 @@ jobs:
       - name: Build the Taylor-Green executable
         run: |
           source setup_env.sh
+          python .github/workflows/enable_solver_traps.py
           cmake -S src -B builds/build_release \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_Fortran_COMPILER=gfortran-12 \
-            -DCMAKE_Fortran_FLAGS="-g -fbacktrace -ffpe-trap=invalid,zero,overflow" \
+            -DCMAKE_Fortran_FLAGS="-g -fbacktrace" \
             -DOFT_BUILD_TESTS=ON -DOFT_BUILD_PYTHON=ON -DOFT_PACKAGE_PYTHON=OFF \
             -DHDF5_ROOT="$PWD/builds/hdf5-install" \
             -DOFT_USE_MPI=OFF -DBLA_VENDOR=OpenBLAS \

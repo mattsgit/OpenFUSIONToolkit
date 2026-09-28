@@ -30,7 +30,7 @@ jobs:
       - name: Install packaged dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y gcc-12 g++-12 gfortran-12 libopenblas-dev libmetis-dev libsuitesparse-dev libsuperlu-dev libxml2-dev libopenmpi-dev openmpi-bin
+          sudo apt-get install -y gcc-12 g++-12 gfortran-12 libopenblas-dev libmetis-dev libsuitesparse-dev libsuperlu-dev libxml2-dev libopenmpi-dev openmpi-bin libarpack2-dev libparpack2-dev
           python3 -m venv oft_venv
           echo 'source "${{ github.workspace }}/oft_venv/bin/activate"' > setup_env.sh
           source setup_env.sh
@@ -87,7 +87,7 @@ jobs:
             -DHDF5_ROOT="$PWD/builds/hdf5-install" \
             -DOFT_USE_MPI=${{ matrix.mpi }} -DBLA_VENDOR=OpenBLAS \
             -DOFT_UMFPACK_ROOT="$PWD/builds/suitesparse-install" \
-            -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
+            -DOFT_ARPACK_ROOT=/usr -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
           cmake --build builds/build_release --target test_stitching test_native_bjacobi test_taylor_green_2d oftpy oft_triangle python_scripts -j 4
       - name: Prove the regression fails on the old dot product
         run: |

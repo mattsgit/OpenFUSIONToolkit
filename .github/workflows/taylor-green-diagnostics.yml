@@ -20,12 +20,27 @@ jobs:
       - name: Install packaged dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y gcc-12 g++-12 gfortran-12 libopenblas-dev libhdf5-dev libmetis-dev libsuitesparse-dev libsuperlu-dev libxml2-dev
+          sudo apt-get install -y gcc-12 g++-12 gfortran-12 libopenblas-dev libmetis-dev libsuitesparse-dev libsuperlu-dev libxml2-dev
           python3 -m venv oft_venv
           echo 'source "${{ github.workspace }}/oft_venv/bin/activate"' > setup_env.sh
           source setup_env.sh
           python -m pip install cmake==3.27.9 pytest numpy scipy h5py matplotlib
           mkdir -p diagnostic-results
+      - name: Build the supported HDF5 version
+        run: |
+          source setup_env.sh
+          mkdir -p builds
+          curl --fail --location --retry 3 https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.6/hdf5-1.14.6.tar.gz -o builds/hdf5.tar.gz
+          tar -xzf builds/hdf5.tar.gz -C builds
+          cmake -S builds/hdf5-1.14.6 -B builds/hdf5-build \
+            -DCMAKE_INSTALL_PREFIX="$PWD/builds/hdf5-install" \
+            -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_Fortran_COMPILER=gfortran-12 \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DHDF5_BUILD_FORTRAN=ON -DHDF5_BUILD_CPP_LIB=OFF \
+            -DBUILD_TESTING=OFF -DHDF5_BUILD_EXAMPLES=OFF -DHDF5_BUILD_TOOLS=OFF \
+            -DHDF5_BUILD_HL_LIB=OFF -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=OFF
+          cmake --build builds/hdf5-build -j 4
+          cmake --install builds/hdf5-build
       - name: Add failure-exit diagnostics
         run: python3 .github/workflows/instrument_newton.py
       - name: Build the Taylor-Green executable
@@ -35,6 +50,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_Fortran_COMPILER=gfortran-12 \
             -DOFT_BUILD_TESTS=ON -DOFT_BUILD_PYTHON=ON -DOFT_PACKAGE_PYTHON=OFF \
+            -DHDF5_ROOT="$PWD/builds/hdf5-install" \
             -DOFT_USE_MPI=OFF -DBLA_VENDOR=OpenBLAS \
             -DOFT_UMFPACK_ROOT=/usr -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
           cmake --build builds/build_release --target test_taylor_green_2d -j 4

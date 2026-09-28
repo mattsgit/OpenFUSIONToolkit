@@ -10,7 +10,7 @@ import test_taylor_green_2d as case
 
 
 def run_traced(command, nproc, timeout):
-    """Run the serial executable with output captured without pipe-buffer deadlock.
+    """Stream the serial executable output to the collecting parent process.
 
     @param command Existing test executable command
     @param nproc Number of MPI processes, restricted to one for this diagnostic
@@ -18,9 +18,7 @@ def run_traced(command, nproc, timeout):
     @result Whether the executable exited successfully
     """
     assert nproc == 1
-    result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
-    print(result.stdout, flush=True)
-    print(result.stderr, flush=True)
+    result = subprocess.run(command, shell=True, timeout=timeout)
     return result.returncode == 0
 
 

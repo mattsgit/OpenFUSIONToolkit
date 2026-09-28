@@ -13,12 +13,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mpi: ['OFF', 'ON']
+        mpi: ['ON']
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
       OMP_NUM_THREADS: 2
       OPENBLAS_NUM_THREADS: 1
+      OMPI_CC: gcc-12
+      OMPI_CXX: g++-12
+      OMPI_FC: gfortran-12
     steps:
       - uses: actions/checkout@v5
         with:
@@ -73,7 +76,8 @@ jobs:
         run: |
           source setup_env.sh
           cp src/base/oft_stitching.F90 /tmp/fixed-stitching.F90
-          git show HEAD^:src/base/oft_stitching.F90 > src/base/oft_stitching.F90
+          git fetch --no-tags --depth=1 origin 51739c7a3908f80ef40b670222d2a17a61ea675e
+          git show FETCH_HEAD:src/base/oft_stitching.F90 > src/base/oft_stitching.F90
           cmake -S src -B builds/build_release \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_Fortran_COMPILER=gfortran-12 \

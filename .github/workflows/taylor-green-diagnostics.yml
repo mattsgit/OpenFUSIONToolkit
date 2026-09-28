@@ -1,0 +1,50 @@
+name: Taylor-Green solver diagnostics
+
+on:
+  push:
+    branches: [mattsgit/taylor-green-diagnostics]
+
+permissions:
+  contents: read
+
+jobs:
+  solver-trace:
+    if: github.repository == 'mattsgit/OpenFUSIONToolkit'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      OMP_NUM_THREADS: 2
+      OPENBLAS_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install packaged dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-12 g++-12 gfortran-12 libopenblas-dev libhdf5-dev libmetis-dev libsuitesparse-dev libsuperlu-dev libxml2-dev
+          python3 -m venv oft_venv
+          echo 'source "${{ github.workspace }}/oft_venv/bin/activate"' > setup_env.sh
+          source setup_env.sh
+          python -m pip install cmake==3.27.9 pytest numpy scipy h5py matplotlib
+          mkdir -p diagnostic-results
+      - name: Add failure-exit diagnostics
+        run: python3 .github/workflows/instrument_newton.py
+      - name: Build the Taylor-Green executable
+        run: |
+          source setup_env.sh
+          cmake -S src -B builds/build_release \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_Fortran_COMPILER=gfortran-12 \
+            -DOFT_BUILD_TESTS=ON -DOFT_BUILD_PYTHON=OFF -DOFT_PACKAGE_PYTHON=OFF \
+            -DOFT_USE_MPI=OFF -DBLA_VENDOR=OpenBLAS \
+            -DOFT_UMFPACK_ROOT=/usr -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
+          cmake --build builds/build_release --target test_taylor_green_2d -j 4
+      - name: Repeat the failing case with solver traces
+        run: |
+          source setup_env.sh
+          python .github/workflows/repeat_newton.py
+      - name: Upload solver traces
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: taylor-green-solver-traces
+          path: diagnostic-results

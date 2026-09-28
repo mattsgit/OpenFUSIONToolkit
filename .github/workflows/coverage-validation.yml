@@ -1,0 +1,80 @@
+name: PR 354 coverage validation
+
+on:
+  push:
+    branches: [mattsgit/coverage-validation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    if: github.repository == 'mattsgit/OpenFUSIONToolkit'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      CC: gcc-12
+      CXX: g++-12
+      FC: gfortran-12
+      GCOV: gcov-12
+      OMP_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify PR source and prepare environment
+        run: |
+          git fetch --depth=1 origin e5ca26dd50a4cbdd02a7e7b217b2007386752f64
+          git diff --exit-code e5ca26dd50a4cbdd02a7e7b217b2007386752f64 -- src .github/workflows/cov_build.yaml
+          git rev-parse HEAD
+          lscpu
+          python3 -m venv oft_venv
+          echo 'source "${{ github.workspace }}/oft_venv/bin/activate"' > setup_env.sh
+          source setup_env.sh
+          python -m pip install pytest coverage numpy scipy h5py netcdf4 matplotlib
+          mkdir -p builds diagnostic-results
+      - name: Restore external libraries
+        id: dependencies
+        uses: actions/cache/restore@v5
+        with:
+          path: builds
+          key: coverage-validation-${{ runner.os }}-gcc12-${{ hashFiles('src/utilities/build_libs.py', '.github/workflows/cov_build.yaml', '.github/workflows/coverage-validation.yml') }}
+      - name: Build external libraries
+        timeout-minutes: 120
+        working-directory: builds
+        run: |
+          source ../setup_env.sh
+          python ../src/utilities/build_libs.py --no_dl_progress --nthread=4 --oblas_dynamic_arch \
+            --build_mpich=1 --build_arpack=1 --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 \
+            --build_cmake=1 --oft_build_tests=1 --oft_build_coverage \
+            2>&1 | tee ../diagnostic-results/dependencies.log
+      - name: Save dependencies before running tests
+        if: steps.dependencies.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: builds
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}
+      - name: Configure and build OFT
+        working-directory: builds
+        run: |
+          source ../setup_env.sh
+          bash config_cmake.sh 2>&1 | tee ../diagnostic-results/configure.log
+          cmake --build build_release -j 4 2>&1 | tee ../diagnostic-results/build.log
+      - name: Run the coverage regression suite
+        timeout-minutes: 120
+        working-directory: builds/build_release
+        run: |
+          source ../../setup_env.sh
+          make test 2>&1 | tee ../../diagnostic-results/tests.log
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr354-coverage-validation
+          path: |
+            diagnostic-results
+            builds/build/build_error.log
+            builds/build_release/tests/OFT.junit.xml
+          if-no-files-found: warn

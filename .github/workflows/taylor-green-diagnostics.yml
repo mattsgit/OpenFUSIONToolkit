@@ -10,6 +10,10 @@ permissions:
 jobs:
   solver-trace:
     if: github.repository == 'mattsgit/OpenFUSIONToolkit'
+    strategy:
+      fail-fast: false
+      matrix:
+        mpi: ['OFF', 'ON']
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
@@ -17,10 +21,12 @@ jobs:
       OPENBLAS_NUM_THREADS: 1
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
       - name: Install packaged dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y gcc-12 g++-12 gfortran-12 libopenblas-dev libmetis-dev libsuitesparse-dev libsuperlu-dev libxml2-dev
+          sudo apt-get install -y gcc-12 g++-12 gfortran-12 libopenblas-dev libmetis-dev libsuitesparse-dev libsuperlu-dev libxml2-dev libopenmpi-dev openmpi-bin
           python3 -m venv oft_venv
           echo 'source "${{ github.workspace }}/oft_venv/bin/activate"' > setup_env.sh
           source setup_env.sh
@@ -66,33 +72,42 @@ jobs:
       - name: Build the Taylor-Green executable
         run: |
           source setup_env.sh
-          python .github/workflows/enable_solver_traps.py
+          cp src/base/oft_stitching.F90 /tmp/fixed-stitching.F90
+          git show HEAD^:src/base/oft_stitching.F90 > src/base/oft_stitching.F90
           cmake -S src -B builds/build_release \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_Fortran_COMPILER=gfortran-12 \
             -DCMAKE_Fortran_FLAGS="-g -fbacktrace" \
             -DOFT_BUILD_TESTS=ON -DOFT_BUILD_PYTHON=ON -DOFT_PACKAGE_PYTHON=OFF \
             -DHDF5_ROOT="$PWD/builds/hdf5-install" \
-            -DOFT_USE_MPI=OFF -DBLA_VENDOR=OpenBLAS \
+            -DOFT_USE_MPI=${{ matrix.mpi }} -DBLA_VENDOR=OpenBLAS \
             -DOFT_UMFPACK_ROOT="$PWD/builds/suitesparse-install" \
             -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
-          cmake --build builds/build_release --target test_taylor_green_2d -j 4
-      - name: Repeat the uninstrumented case
+          cmake --build builds/build_release -j 4
+      - name: Prove the regression fails on the old dot product
         run: |
           source setup_env.sh
-          TRACE_VERBOSE=0 TRACE_PHASE=baseline python .github/workflows/repeat_newton.py
-      - name: Add failure-exit diagnostics
+          python .github/workflows/check_old_dot.py
+      - name: Build the fix with solver arithmetic traps
         run: |
           source setup_env.sh
-          python .github/workflows/instrument_newton.py
-          cmake --build builds/build_release --target test_taylor_green_2d -j 4
-      - name: Repeat the failing case with solver traces
+          cp /tmp/fixed-stitching.F90 src/base/oft_stitching.F90
+          python .github/workflows/enable_solver_traps.py
+          cmake --build builds/build_release -j 4
+      - name: Verify owned dot products and existing solver regressions
+        working-directory: builds/build_release/tests
+        run: |
+          source ../../../setup_env.sh
+          bash run_test.sh -q -m "not slow" base/test_stitching.py lin_alg/test_native_bjacobi.py physics/test_taylor_green_2d.py physics/test_ThinCurr.py
+      - name: Repeat Taylor-Green with the fix
+        if: always()
         run: |
           source setup_env.sh
-          python .github/workflows/repeat_newton.py
+          TRACE_VERBOSE=0 TRACE_PHASE=fixed TRACE_REPEATS=30 python .github/workflows/repeat_newton.py
+          python -c 'import json; from pathlib import Path; runs=json.loads(Path("diagnostic-results/fixed/summary.json").read_text()); assert len(runs)==90 and all(run["status"]==0 for run in runs)'
       - name: Upload solver traces
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: taylor-green-solver-traces
+          name: taylor-green-solver-traces-${{ matrix.mpi }}
           path: diagnostic-results

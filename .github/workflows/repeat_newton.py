@@ -12,7 +12,7 @@ results = root / 'diagnostic-results' / os.environ.get('TRACE_PHASE', 'traced')
 results.mkdir(parents=True, exist_ok=True)
 records = []
 for threads in (2, 1, 4):
-    for iteration in range(1, 16):
+    for iteration in range(1, int(os.environ.get('TRACE_REPEATS', '15')) + 1):
         env = dict(os.environ, OMP_NUM_THREADS=str(threads))
         try:
             process = subprocess.Popen(

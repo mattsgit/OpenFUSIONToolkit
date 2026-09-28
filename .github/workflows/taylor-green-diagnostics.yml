@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mpi: ['OFF', 'ON']
+        mpi: ['ON']
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
@@ -76,6 +76,9 @@ jobs:
       - name: Build the Taylor-Green executable
         run: |
           source setup_env.sh
+          cp src/base/oft_stitching.F90 /tmp/fixed-stitching.F90
+          git fetch --no-tags --depth=1 origin 51739c7a3908f80ef40b670222d2a17a61ea675e
+          git show FETCH_HEAD:src/base/oft_stitching.F90 > src/base/oft_stitching.F90
           cmake -S src -B builds/build_release \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_Fortran_COMPILER=gfortran-12 \
@@ -85,12 +88,20 @@ jobs:
             -DOFT_USE_MPI=${{ matrix.mpi }} -DBLA_VENDOR=OpenBLAS \
             -DOFT_UMFPACK_ROOT="$PWD/builds/suitesparse-install" \
             -DOFT_ARPACK_ROOT=/usr -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
-          cmake --build builds/build_release --target oftpy oft_triangle python_scripts -j 4
-      - name: Verify the ThinCurr tests requiring netCDF4
-        working-directory: builds/build_release/tests
+          cmake --build builds/build_release --target test_native_bjacobi oftpy oft_triangle python_scripts -j 4
+      - name: Capture remaining cases on unchanged main
         run: |
-          source ../../../setup_env.sh
-          python -m pytest -q physics/test_ThinCurr.py -k test_torus_fourier_sensor --junitxml=../../../diagnostic-results/netcdf-tests.xml
+          source setup_env.sh
+          python .github/workflows/compare_remaining.py baseline
+      - name: Rebuild the proposed fix
+        run: |
+          source setup_env.sh
+          cp /tmp/fixed-stitching.F90 src/base/oft_stitching.F90
+          cmake --build builds/build_release --target test_native_bjacobi oftpy -j 4
+      - name: Compare remaining cases with the fix
+        run: |
+          source setup_env.sh
+          python .github/workflows/compare_remaining.py fixed
       - name: Upload solver traces
         if: always()
         uses: actions/upload-artifact@v6

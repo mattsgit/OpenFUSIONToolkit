@@ -8,8 +8,8 @@ import subprocess
 import sys
 
 root = Path.cwd()
-results = root / 'diagnostic-results'
-results.mkdir(exist_ok=True)
+results = root / 'diagnostic-results' / os.environ.get('TRACE_PHASE', 'traced')
+results.mkdir(parents=True, exist_ok=True)
 records = []
 for threads in (2, 1, 4):
     for iteration in range(1, 16):
@@ -22,6 +22,8 @@ for threads in (2, 1, 4):
                 text=True, start_new_session=True)
             output, _ = process.communicate(timeout=180)
             status = process.returncode
+            if 'ERROR:' in output or 'WARNING:' in output:
+                status = status or 1
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             output, _ = process.communicate()

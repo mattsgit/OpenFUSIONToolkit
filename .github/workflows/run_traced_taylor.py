@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 """Run the existing Taylor-Green assertions while draining verbose solver output."""
 import math
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -23,7 +24,8 @@ def run_traced(command, nproc, timeout):
 
 
 case.run_OFT = run_traced
-case.oft_in_template = case.oft_in_template.replace('pm=F', 'pm=T')
+if os.environ.get('TRACE_VERBOSE', '1') == '1':
+    case.oft_in_template = case.oft_in_template.replace('pm=F', 'pm=T')
 case.test_taylor_green_p2(True)
 errors = [float(value) for value in Path('taylor_green_2d.results').read_text().split()]
 assert len(errors) == 3 and all(math.isfinite(value) for value in errors)

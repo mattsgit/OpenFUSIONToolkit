@@ -26,7 +26,16 @@ jobs:
           source setup_env.sh
           python -m pip install cmake==3.27.9 pytest numpy scipy h5py matplotlib
           mkdir -p diagnostic-results
+      - name: Cache targeted dependencies
+        id: deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            builds/hdf5-install
+            builds/suitesparse-install
+          key: taylor-gcc12-hdf5-1.14.6-umfpack-6.3.5-v1
       - name: Build the supported HDF5 version
+        if: steps.deps.outputs.cache-hit != 'true'
         run: |
           source setup_env.sh
           mkdir -p builds
@@ -41,8 +50,19 @@ jobs:
             -DHDF5_BUILD_HL_LIB=OFF -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=OFF
           cmake --build builds/hdf5-build -j 4
           cmake --install builds/hdf5-build
-      - name: Add failure-exit diagnostics
-        run: python3 .github/workflows/instrument_newton.py
+      - name: Build the CI version of UMFPACK
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: |
+          source setup_env.sh
+          curl --fail --location --retry 3 https://github.com/DrTimothyAldenDavis/SuiteSparse/archive/refs/tags/v7.10.1.tar.gz -o builds/suitesparse.tar.gz
+          tar -xzf builds/suitesparse.tar.gz -C builds
+          export CC=gcc-12 CXX=g++-12 CX=g++-12 FC=gfortran-12 JOBS=4 OPTIMIZATION=-O2 AUTOCC=no
+          export CMAKE_PREFIX_PATH="$PWD/builds/suitesparse-install"
+          for component in SuiteSparse_config AMD UMFPACK; do
+            make -C "builds/SuiteSparse-7.10.1/$component" library \
+              CMAKE_OPTIONS="-DCMAKE_INSTALL_PREFIX=$PWD/builds/suitesparse-install -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON -DBLA_VENDOR=OpenBLAS -DUMFPACK_USE_CHOLMOD=OFF"
+            make -C "builds/SuiteSparse-7.10.1/$component" install
+          done
       - name: Build the Taylor-Green executable
         run: |
           source setup_env.sh
@@ -52,7 +72,17 @@ jobs:
             -DOFT_BUILD_TESTS=ON -DOFT_BUILD_PYTHON=ON -DOFT_PACKAGE_PYTHON=OFF \
             -DHDF5_ROOT="$PWD/builds/hdf5-install" \
             -DOFT_USE_MPI=OFF -DBLA_VENDOR=OpenBLAS \
-            -DOFT_UMFPACK_ROOT=/usr -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
+            -DOFT_UMFPACK_ROOT="$PWD/builds/suitesparse-install" \
+            -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
+          cmake --build builds/build_release --target test_taylor_green_2d -j 4
+      - name: Repeat the uninstrumented case
+        run: |
+          source setup_env.sh
+          TRACE_VERBOSE=0 TRACE_PHASE=baseline python .github/workflows/repeat_newton.py
+      - name: Add failure-exit diagnostics
+        run: |
+          source setup_env.sh
+          python .github/workflows/instrument_newton.py
           cmake --build builds/build_release --target test_taylor_green_2d -j 4
       - name: Repeat the failing case with solver traces
         run: |

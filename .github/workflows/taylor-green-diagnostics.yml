@@ -1,4 +1,4 @@
-name: Taylor-Green solver diagnostics
+name: PR 355 test preconditioner validation
 
 on:
   push:
@@ -10,14 +10,10 @@ permissions:
 jobs:
   solver-trace:
     if: github.repository == 'mattsgit/OpenFUSIONToolkit'
-    strategy:
-      fail-fast: false
-      matrix:
-        mpi: ['ON']
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 360
     env:
-      OFT_HAVE_MPI: ${{ matrix.mpi == 'ON' && '1' || '0' }}
+      OFT_HAVE_MPI: '0'
       OMP_NUM_THREADS: 2
       OPENBLAS_NUM_THREADS: 1
       OMPI_CC: gcc-12
@@ -26,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Install packaged dependencies
         run: |
           sudo apt-get update -qq
@@ -36,9 +32,9 @@ jobs:
           source setup_env.sh
           python -m pip install cmake==3.27.9 pytest numpy scipy h5py matplotlib netcdf4
           mkdir -p diagnostic-results
-      - name: Cache targeted dependencies
+      - name: Restore targeted dependencies
         id: deps
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: |
             builds/hdf5-install
@@ -73,38 +69,71 @@ jobs:
               CMAKE_OPTIONS="-DCMAKE_INSTALL_PREFIX=$PWD/builds/suitesparse-install -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON -DBLA_VENDOR=OpenBLAS -DUMFPACK_USE_CHOLMOD=OFF"
             make -C "builds/SuiteSparse-7.10.1/$component" install
           done
-      - name: Build the Taylor-Green executable
+      - name: Save dependencies before validation
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            builds/hdf5-install
+            builds/suitesparse-install
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+      - name: Build the native OpenMP configuration
         run: |
           source setup_env.sh
-          cp src/base/oft_stitching.F90 /tmp/fixed-stitching.F90
-          git fetch --no-tags --depth=1 origin 51739c7a3908f80ef40b670222d2a17a61ea675e
-          git show FETCH_HEAD:src/base/oft_stitching.F90 > src/base/oft_stitching.F90
-          cmake -S src -B builds/build_release \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_Fortran_COMPILER=gfortran-12 \
-            -DCMAKE_Fortran_FLAGS="-g -fbacktrace" \
-            -DOFT_BUILD_TESTS=ON -DOFT_BUILD_PYTHON=ON -DOFT_PACKAGE_PYTHON=OFF \
-            -DHDF5_ROOT="$PWD/builds/hdf5-install" \
-            -DOFT_USE_MPI=${{ matrix.mpi }} -DBLA_VENDOR=OpenBLAS \
-            -DOFT_UMFPACK_ROOT="$PWD/builds/suitesparse-install" \
-            -DOFT_ARPACK_ROOT=/usr -DOFT_SUPERLU_ROOT=/usr -DSUPERLU_INCLUDE_DIR=/usr/include/superlu
-          cmake --build builds/build_release --target test_native_bjacobi oftpy oft_triangle python_scripts -j 4
-      - name: Capture remaining cases on unchanged main
+          bash .github/workflows/configure_taylor_validation.sh OFF
+      - name: Gate on baseline comparison and two-block feasibility
+        timeout-minutes: 25
         run: |
           source setup_env.sh
-          python .github/workflows/compare_remaining.py baseline
-      - name: Rebuild the proposed fix
+          python .github/workflows/validate_taylor_preconditioner.py smoke
+      - name: Compare inner Arnoldi residuals in a diagnostic build
+        timeout-minutes: 25
         run: |
           source setup_env.sh
-          cp /tmp/fixed-stitching.F90 src/base/oft_stitching.F90
-          cmake --build builds/build_release --target test_native_bjacobi oftpy -j 4
-      - name: Compare remaining cases with the fix
-        run: |
-          source setup_env.sh
-          python .github/workflows/compare_remaining.py fixed
-      - name: Upload solver traces
+          trap 'git restore --source=HEAD --worktree src/lin_alg/native_solvers.F90' EXIT
+          python .github/workflows/trace_taylor_preconditioner.py
+          cmake --build builds/build_release --target test_taylor_green_2d -j 4
+          python .github/workflows/validate_taylor_preconditioner.py smoke --output-dir diagnostic-results/arnoldi-trace
+          git restore --source=HEAD --worktree src/lin_alg/native_solvers.F90
+          trap - EXIT
+          cmake --build builds/build_release --target test_taylor_green_2d -j 4
+      - name: Upload feasibility evidence
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: taylor-green-solver-traces-${{ matrix.mpi }}
+          name: pr355-preconditioner-feasibility
+          path: diagnostic-results
+      - name: Run all OpenMP Taylor-Green cases
+        timeout-minutes: 30
+        run: |
+          source setup_env.sh
+          python .github/workflows/validate_taylor_preconditioner.py suite
+      - name: Repeat the affected OpenMP case
+        timeout-minutes: 90
+        run: |
+          source setup_env.sh
+          python .github/workflows/validate_taylor_preconditioner.py repeat
+      - name: Build the native MPI configuration
+        run: |
+          source setup_env.sh
+          bash .github/workflows/configure_taylor_validation.sh ON
+      - name: Run all MPI-enabled Taylor-Green cases
+        timeout-minutes: 30
+        env:
+          OFT_HAVE_MPI: '1'
+        run: |
+          source setup_env.sh
+          python .github/workflows/validate_taylor_preconditioner.py suite
+      - name: Repeat the affected case in the MPI-enabled build
+        timeout-minutes: 90
+        env:
+          OFT_HAVE_MPI: '1'
+        run: |
+          source setup_env.sh
+          python .github/workflows/validate_taylor_preconditioner.py repeat
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr355-preconditioner-validation
           path: diagnostic-results
